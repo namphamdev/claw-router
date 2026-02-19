@@ -47,4 +47,4 @@ A hybrid AI router combining features of [ClawRouter](https://github.com/BlockRu
 
 ## Configuration
 
-Configuration is stored in `backend/config.json` (created on first run). You can also manage it via the Frontend Settings page.
+Configuration is stored in `backend/config/config.json` (created on first run). You can also manage it via the Frontend Settings page.

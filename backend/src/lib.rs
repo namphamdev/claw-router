@@ -9,9 +9,12 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use tower_http::services::{ServeDir, ServeFile};
 
 /// Build the application router with the given state.
 pub fn app(state: state::AppState) -> Router {
+    let spa_fallback = ServeDir::new("static").fallback(ServeFile::new("static/index.html"));
+
     Router::new()
         .route("/v1/chat/completions", post(handlers::chat_completions))
         .route("/v1/models", get(handlers::list_models))
@@ -22,4 +25,5 @@ pub fn app(state: state::AppState) -> Router {
         .route("/api/stats", get(handlers::get_stats))
         .route("/api/logs", get(handlers::get_logs))
         .with_state(state)
+        .fallback_service(spa_fallback)
 }

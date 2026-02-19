@@ -39,7 +39,7 @@ pub fn cache_key(model: &str, messages: &[serde_json::Value], extra: &std::colle
 
     // Hash deterministic subset of extra params that affect output
     let mut keys: Vec<&String> = extra.keys()
-        .filter(|k| matches!(k.as_str(), "temperature" | "top_p" | "max_tokens" | "max_completion_tokens" | "tools" | "tool_choice" | "stop" | "response_format" | "seed"))
+        .filter(|k| matches!(k.as_str(), "temperature" | "top_p" | "max_tokens" | "max_completion_tokens" | "tools" | "tool_choice" | "stop" | "response_format" | "seed" | "stream"))
         .collect();
     keys.sort();
     for k in keys {

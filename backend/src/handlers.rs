@@ -136,19 +136,22 @@ pub async fn chat_completions(
         }
     }
 
-    // Check cache before making any upstream requests
+    // Check cache before making any upstream requests (skip for streaming requests)
     let cache_config = config.cache.clone().unwrap_or_default();
+    let is_streaming = request.extra.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     let cache_key_str = cache::cache_key(&request.model, &request.messages, &request.extra);
 
-    if let Some(cached_body) = cache::get(&cache_config, &cache_key_str) {
-        tracing::info!(model = %request.model, key = %&cache_key_str[..12], "Cache hit");
-        log_entry.provider = Some("cache".to_string());
-        log_entry.status = "success".to_string();
-        log_entry.status_code = Some(200);
-        log_entry.duration_ms = start.elapsed().as_millis() as u64;
-        log_entry.cache_status = Some("hit".to_string());
-        state.add_log(log_entry).await;
-        return (StatusCode::OK, cached_body).into_response();
+    if !is_streaming {
+        if let Some(cached_body) = cache::get(&cache_config, &cache_key_str) {
+            tracing::info!(model = %request.model, key = %&cache_key_str[..12], "Cache hit");
+            log_entry.provider = Some("cache".to_string());
+            log_entry.status = "success".to_string();
+            log_entry.status_code = Some(200);
+            log_entry.duration_ms = start.elapsed().as_millis() as u64;
+            log_entry.cache_status = Some("hit".to_string());
+            state.add_log(log_entry).await;
+            return (StatusCode::OK, cached_body).into_response();
+        }
     }
 
     // --- Tool detection (before scoring) ---
@@ -227,10 +230,12 @@ pub async fn chat_completions(
             log_entry.status = "success".to_string();
             log_entry.status_code = Some(status.as_u16());
             log_entry.duration_ms = start.elapsed().as_millis() as u64;
-            log_entry.cache_status = Some("miss".to_string());
+            log_entry.cache_status = Some(if is_streaming { "skip".to_string() } else { "miss".to_string() });
 
-            // Store in cache
-            cache::put(&cache_config, &cache_key_str, &request.model, &final_body);
+            // Store in cache (skip for streaming requests)
+            if !is_streaming {
+                cache::put(&cache_config, &cache_key_str, &request.model, &final_body);
+            }
 
             // Record session pin on success
             if let Some(ref sid) = session_id {
@@ -320,6 +325,8 @@ async fn forward_to_provider(
     let mut forward_headers = headers.clone();
     forward_headers.remove("host");
     forward_headers.remove("content-length");
+    // Let reqwest handle content encoding (gzip decompression) transparently
+    forward_headers.remove("accept-encoding");
 
     if is_anthropic {
         forward_headers.remove("authorization");
@@ -332,20 +339,48 @@ async fn forward_to_provider(
 
     // Build request body based on provider type
     let body: Value = if is_anthropic {
-        let openai_req = build_openai_chat_request(request, effective_model);
-        let anthropic_req: aidapter::anthropic::types::ChatRequest = (&openai_req).into();
-        serde_json::to_value(&anthropic_req).unwrap_or_default()
+        let mut openai_req = build_openai_chat_request(request, effective_model);
+        // Don't pass stream: false to Anthropic API - omit the field instead
+        if openai_req.stream == Some(false) {
+            openai_req.stream = None;
+        }
+        let mut anthropic_req: aidapter::anthropic::types::ChatRequest = (&openai_req).into();
+
+        // Manually build JSON to control float serialization
+        let mut req_json = serde_json::to_value(&anthropic_req).unwrap_or_default();
+
+        // Replace temperature with a properly rounded value
+        if let Some(temp) = anthropic_req.temperature {
+            if let Some(obj) = req_json.as_object_mut() {
+                // Use the original f64 temperature from request instead of the f32
+                if let Some(orig_temp) = request.extra.get("temperature").and_then(|v| v.as_f64()) {
+                    obj.insert("temperature".to_string(), Value::Number(serde_json::Number::from_f64(orig_temp).unwrap()));
+                }
+            }
+        }
+
+        req_json
     } else {
         let mut body_map = serde_json::Map::new();
         body_map.insert("model".to_string(), Value::String(effective_model.to_string()));
         body_map.insert("messages".to_string(), Value::Array(request.messages.clone()));
+        // Only include non-null fields from extra
         for (k, v) in &request.extra {
-            body_map.insert(k.clone(), v.clone());
+            if !v.is_null() {
+                body_map.insert(k.clone(), v.clone());
+            }
         }
         Value::Object(body_map)
     };
 
     // Send request
+    tracing::debug!(
+        provider = %provider.name,
+        url = %url,
+        body = %serde_json::to_string_pretty(&body).unwrap_or_default(),
+        "Sending request to provider"
+    );
+
     let res = client.post(&url)
         .headers(forward_headers)
         .json(&body)
@@ -394,7 +429,9 @@ async fn forward_to_provider(
                 let axum_status = StatusCode::from_u16(resp_status.as_u16()).unwrap_or(StatusCode::OK);
                 Some((axum_status, final_body))
             } else {
-                tracing::warn!("Provider {} failed: {:?}", provider.name, response.status());
+                let status = response.status();
+                let error_body = response.text().await.unwrap_or_default();
+                tracing::warn!("Provider {} failed: {} - {}", provider.name, status, error_body);
                 None
             }
         }

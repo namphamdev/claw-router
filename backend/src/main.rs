@@ -13,7 +13,7 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let config_path = PathBuf::from("config.json");
+    let config_path = PathBuf::from("config/config.json");
     let state = backend::state::AppState::new(config_path).await;
 
     let app = backend::app(state).layer(
@@ -23,7 +23,7 @@ async fn main() {
             .allow_headers(Any),
     );
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     tracing::info!("listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
