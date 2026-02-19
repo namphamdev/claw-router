@@ -1,0 +1,4 @@
+   Compiling backend v0.1.0 (/app/backend)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.98s
+     Running `target/debug/backend`
+[2m2026-02-19T03:52:48.290604Z[0m [32m INFO[0m [2mbackend[0m[2m:[0m listening on 127.0.0.1:3000
