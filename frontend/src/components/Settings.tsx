@@ -3,7 +3,7 @@ import api from "../api";
 import { Button } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/Card";
-import { Plus, Trash2, ChevronDown, ChevronUp, Pencil, RotateCcw } from "lucide-react";
+import { Plus, Trash2, ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
 
 const PROVIDER_TYPES = ["OpenAI", "Anthropic", "Google", "DeepSeek", "XAI", "CustomOpenAI"];
 const TIERS = ["Subscription", "Cheap", "Free", "PayPerRequest"];
